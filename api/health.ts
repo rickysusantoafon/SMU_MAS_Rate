@@ -2,6 +2,8 @@
  * Serverless Health Check Endpoint
  * Route: /api/health
  */
+import dotenv from 'dotenv';
+dotenv.config();
 
 export interface HealthResponse {
   status: 'healthy' | 'degraded';

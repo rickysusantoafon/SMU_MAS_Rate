@@ -8,6 +8,8 @@
  * Header:
  * KeyId: <MAS_KEY_ID>
  */
+import dotenv from 'dotenv';
+dotenv.config();
 
 const MAS_DOMESTIC_RATES_ENDPOINT =
   'https://eservices.mas.gov.sg/apimg-gw/server/monthly_statistical_bulletin_non610mssql/domestic_interest_rates_daily/views/domestic_interest_rates_daily';

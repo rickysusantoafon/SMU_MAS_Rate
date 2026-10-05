@@ -22,6 +22,8 @@ export const BackendIntegrationModal: React.FC<BackendIntegrationModalProps> = (
   onTestFetch,
 }) => {
   const [urlInput, setUrlInput] = useState(currentBackendUrl || '/api/sora');
+  const [testKeyId, setTestKeyId] = useState('');
+  const [showKeyId, setShowKeyId] = useState(false);
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'failed'>('idle');
   const [testError, setTestError] = useState<string | null>(null);
   const [healthStatus, setHealthStatus] = useState<{ checked: boolean; data?: any; error?: string }>({
@@ -36,12 +38,24 @@ export const BackendIntegrationModal: React.FC<BackendIntegrationModalProps> = (
     setTestStatus('testing');
     setTestError(null);
     try {
-      const ok = await onTestFetch(urlInput);
-      if (ok) {
+      const headers: Record<string, string> = { Accept: 'application/json' };
+      if (testKeyId.trim()) {
+        headers['KeyId'] = testKeyId.trim();
+      }
+      const response = await fetch(urlInput, { headers });
+      const data = await response.json();
+
+      if (data.status === 'error') {
+        setTestStatus('failed');
+        setTestError(data.message || `Server returned error (${data.statusCode})`);
+        return;
+      }
+
+      if (data.history || data.data || Array.isArray(data)) {
         setTestStatus('success');
       } else {
         setTestStatus('failed');
-        setTestError('Backend reached but response could not be parsed as valid SORA payload.');
+        setTestError('Response received but no valid records found.');
       }
     } catch (err: any) {
       setTestStatus('failed');
@@ -200,7 +214,7 @@ export const BackendIntegrationModal: React.FC<BackendIntegrationModalProps> = (
           </div>
 
           {/* Endpoint Input */}
-          <div className="space-y-2">
+          <div className="space-y-3">
             <label htmlFor="backend-url-input" className="block text-xs font-semibold text-slate-900">
               Active SORA Endpoint (Default: <code>/api/sora</code>)
             </label>
@@ -225,6 +239,34 @@ export const BackendIntegrationModal: React.FC<BackendIntegrationModalProps> = (
               </button>
             </div>
 
+            {/* Optional Header KeyId for testing */}
+            <div className="pt-2 border-t border-slate-100">
+              <div className="flex items-center justify-between mb-1">
+                <label htmlFor="test-key-id" className="text-xs text-slate-600 font-medium flex items-center gap-1">
+                  <Key className="w-3 h-3 text-slate-400" />
+                  <span>Test MAS KeyId Header (Optional test override):</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setShowKeyId(!showKeyId)}
+                  className="text-[11px] text-slate-500 hover:text-slate-800 transition-colors"
+                >
+                  {showKeyId ? 'Hide' : 'Show'}
+                </button>
+              </div>
+              <input
+                id="test-key-id"
+                type={showKeyId ? 'text' : 'password'}
+                placeholder="Paste MAS KeyId to test live gateway without editing .env..."
+                value={testKeyId}
+                onChange={(e) => {
+                  setTestKeyId(e.target.value);
+                  setTestStatus('idle');
+                }}
+                className="w-full px-3 py-1.5 text-xs border border-slate-300 rounded-md font-mono focus:outline-none focus:ring-2 focus:ring-slate-900 placeholder:text-slate-400"
+              />
+            </div>
+
             {testStatus === 'success' && (
               <div className="flex items-center gap-1.5 text-xs text-emerald-700 font-medium">
                 <Check className="w-3.5 h-3.5" />
@@ -241,6 +283,37 @@ export const BackendIntegrationModal: React.FC<BackendIntegrationModalProps> = (
                 <div className="text-slate-500 pl-5">{testError}</div>
               </div>
             )}
+          </div>
+
+          {/* Environment Variables Reference */}
+          <div className="p-3 bg-slate-100 rounded-md border border-slate-200 text-xs space-y-1.5">
+            <div className="flex items-center justify-between font-semibold text-slate-900">
+              <span>Environment File (/.env)</span>
+              <button
+                onClick={() =>
+                  copyToClipboard(
+                    `MAS_KEY_ID=""\nPORT=3000\nNODE_ENV=development`,
+                    'env_template'
+                  )
+                }
+                className="text-[11px] font-normal text-slate-600 hover:text-slate-900 inline-flex items-center gap-1"
+              >
+                {copiedSnippet === 'env_template' ? (
+                  <span className="text-emerald-600">Copied</span>
+                ) : (
+                  <>
+                    <Copy className="w-3 h-3" />
+                    <span>Copy Template</span>
+                  </>
+                )}
+              </button>
+            </div>
+            <pre className="p-2 bg-white rounded border border-slate-200 font-mono text-[11px] text-slate-800">
+              MAS_KEY_ID=&quot;YOUR_MAS_KEY_ID&quot;
+            </pre>
+            <div className="text-[11px] text-slate-500">
+              In production / serverless environments (e.g. Vercel, Cloud Run), add <code>MAS_KEY_ID</code> to your project's Environment Variables settings.
+            </div>
           </div>
 
           {/* Sample Backend Implementations (Ready to Copy) */}
