@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Check, Copy, AlertCircle, Database, CheckCircle2, ArrowUpRight, Terminal } from 'lucide-react';
+import { X, Check, Copy, AlertCircle, Database, CheckCircle2, Terminal, Activity, Key } from 'lucide-react';
 import { SAMPLE_BACKEND_EXPRESS_CODE, SAMPLE_BACKEND_PYTHON_CODE } from '../services/masSoraService';
 
 interface BackendIntegrationModalProps {
@@ -21,9 +21,12 @@ export const BackendIntegrationModal: React.FC<BackendIntegrationModalProps> = (
   statusMessage,
   onTestFetch,
 }) => {
-  const [urlInput, setUrlInput] = useState(currentBackendUrl);
+  const [urlInput, setUrlInput] = useState(currentBackendUrl || '/api/sora');
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'failed'>('idle');
   const [testError, setTestError] = useState<string | null>(null);
+  const [healthStatus, setHealthStatus] = useState<{ checked: boolean; data?: any; error?: string }>({
+    checked: false,
+  });
   const [copiedSnippet, setCopiedSnippet] = useState<string | null>(null);
   const [activeCodeTab, setActiveCodeTab] = useState<'express' | 'python'>('express');
 
@@ -46,14 +49,24 @@ export const BackendIntegrationModal: React.FC<BackendIntegrationModalProps> = (
     }
   };
 
+  const handleTestHealth = async () => {
+    try {
+      const res = await fetch('/api/health');
+      const data = await res.json();
+      setHealthStatus({ checked: true, data });
+    } catch (err: any) {
+      setHealthStatus({ checked: true, error: err.message });
+    }
+  };
+
   const handleSave = () => {
     onSaveBackendUrl(urlInput);
     onClose();
   };
 
   const handleResetToBenchmark = () => {
-    setUrlInput('');
-    onSaveBackendUrl('');
+    setUrlInput('/api/sora');
+    onSaveBackendUrl('/api/sora');
     setTestStatus('idle');
   };
 
@@ -74,10 +87,10 @@ export const BackendIntegrationModal: React.FC<BackendIntegrationModalProps> = (
             </div>
             <div>
               <h3 className="text-base font-bold text-slate-900">
-                MAS Backend Rate Integration
+                MAS Serverless Backend Configuration
               </h3>
               <p className="text-xs text-slate-500">
-                Configure your server proxy to stream live MAS SORA rates into the calculator.
+                Serverless endpoints located in project root <code>/api</code> (<code>/api/sora.ts</code>, <code>/api/health.ts</code>).
               </p>
             </div>
           </div>
@@ -91,10 +104,10 @@ export const BackendIntegrationModal: React.FC<BackendIntegrationModalProps> = (
 
         {/* Modal Body */}
         <div className="p-6 overflow-y-auto space-y-6 text-sm">
-          {/* Current Status banner */}
+          {/* Status banner */}
           <div className="p-3.5 bg-slate-50 rounded-md border border-slate-200 flex items-start gap-3">
             <div className="mt-0.5">
-              {dataSource === 'custom_backend' ? (
+              {dataSource === 'custom_backend' || dataSource === 'mas_api' ? (
                 <CheckCircle2 className="w-4 h-4 text-emerald-600" />
               ) : (
                 <AlertCircle className="w-4 h-4 text-sky-600" />
@@ -104,28 +117,98 @@ export const BackendIntegrationModal: React.FC<BackendIntegrationModalProps> = (
               <div className="font-semibold text-slate-900 mb-0.5">
                 Current Status:{' '}
                 {dataSource === 'custom_backend'
-                  ? 'Connected to User Backend'
+                  ? 'Connected via Serverless /api/sora'
                   : dataSource === 'mas_api'
-                  ? 'Connected to MAS Open Datastore'
+                  ? 'Connected to Live MAS APIMG Gateway'
                   : 'MAS Benchmark Mode Active'}
               </div>
               <p className="text-slate-600 leading-relaxed">
                 {statusMessage ||
-                  'The frontend is fully built and ready to ingest live SORA rates from your server once you provide an endpoint.'}
+                  'Serverless connection initialized at /api/sora. Set MAS_KEY_ID in .env to stream authenticated live rates from MAS.'}
               </p>
+            </div>
+          </div>
+
+          {/* Active Serverless Endpoints Box */}
+          <div className="p-4 bg-slate-50/70 border border-slate-200 rounded-md space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-900 uppercase tracking-wider">
+                Serverless Endpoints in /api
+              </span>
+              <button
+                onClick={handleTestHealth}
+                className="text-xs font-medium text-slate-700 hover:text-slate-900 inline-flex items-center gap-1 bg-white border border-slate-200 px-2 py-0.5 rounded shadow-2xs hover:bg-slate-50 transition-colors"
+              >
+                <Activity className="w-3 h-3 text-emerald-600" />
+                <span>Probe /api/health</span>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs font-mono">
+              <div className="p-2.5 bg-white border border-slate-200 rounded">
+                <div className="text-[11px] text-slate-500 font-sans">SORA Rates Feed</div>
+                <div className="font-semibold text-slate-900">GET /api/sora</div>
+                <div className="text-[10px] text-slate-500 font-sans mt-0.5">Pulls domestic interest rates daily</div>
+              </div>
+              <div className="p-2.5 bg-white border border-slate-200 rounded">
+                <div className="text-[11px] text-slate-500 font-sans">Gateway Health</div>
+                <div className="font-semibold text-slate-900">GET /api/health</div>
+                <div className="text-[10px] text-slate-500 font-sans mt-0.5">Uptime &amp; KeyId detection</div>
+              </div>
+            </div>
+
+            {healthStatus.checked && (
+              <div className="p-2.5 bg-slate-900 text-slate-100 rounded text-xs font-mono">
+                {healthStatus.error ? (
+                  <div className="text-rose-400">Health Probe Error: {healthStatus.error}</div>
+                ) : (
+                  <div>
+                    <span className="text-emerald-400">Health: OK</span> ·{' '}
+                    <span>Uptime: {healthStatus.data?.uptimeSeconds}s</span> ·{' '}
+                    <span className={healthStatus.data?.masKeyConfigured ? 'text-emerald-400' : 'text-amber-400'}>
+                      MAS_KEY_ID: {healthStatus.data?.masKeyConfigured ? 'Configured' : 'Not Set (Set in .env)'}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* MAS APIMG Gateway Specifications */}
+          <div className="space-y-2 text-xs">
+            <span className="font-semibold uppercase tracking-wider text-slate-500">
+              MAS APIMG Gateway Specifications
+            </span>
+            <div className="p-3 bg-white border border-slate-200 rounded-md space-y-2 font-mono text-[11px]">
+              <div>
+                <span className="text-slate-500 font-sans">Target MAS Endpoint:</span>
+                <div className="text-slate-900 break-all select-all font-semibold">
+                  https://eservices.mas.gov.sg/apimg-gw/server/monthly_statistical_bulletin_non610mssql/domestic_interest_rates_daily/views/domestic_interest_rates_daily
+                </div>
+              </div>
+              <div className="flex items-center gap-2 pt-1 border-t border-slate-100">
+                <Key className="w-3.5 h-3.5 text-slate-500" />
+                <span className="text-slate-500 font-sans">Required Header:</span>
+                <span className="text-slate-900 font-bold bg-slate-100 px-1.5 py-0.5 rounded">
+                  KeyId: &lt;MAS_KEY_ID&gt;
+                </span>
+              </div>
+              <div className="text-[11px] text-slate-600 font-sans pt-1">
+                Configure your API key by setting <code>MAS_KEY_ID=&quot;your_key_here&quot;</code> in your <code>.env</code> file. No keys are hardcoded in code.
+              </div>
             </div>
           </div>
 
           {/* Endpoint Input */}
           <div className="space-y-2">
             <label htmlFor="backend-url-input" className="block text-xs font-semibold text-slate-900">
-              Custom Backend Endpoint URL
+              Active SORA Endpoint (Default: <code>/api/sora</code>)
             </label>
             <div className="flex gap-2">
               <input
                 id="backend-url-input"
                 type="text"
-                placeholder="e.g. http://localhost:3001/api/sora or https://your-server.com/api/mas-sora"
+                placeholder="/api/sora or http://localhost:3000/api/sora"
                 value={urlInput}
                 onChange={(e) => {
                   setUrlInput(e.target.value);
@@ -138,14 +221,14 @@ export const BackendIntegrationModal: React.FC<BackendIntegrationModalProps> = (
                 disabled={testStatus === 'testing' || !urlInput.trim()}
                 className="px-3 py-2 text-xs font-medium text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-md transition-colors disabled:opacity-50 whitespace-nowrap"
               >
-                {testStatus === 'testing' ? 'Testing...' : 'Test URL'}
+                {testStatus === 'testing' ? 'Testing...' : 'Test Endpoint'}
               </button>
             </div>
 
             {testStatus === 'success' && (
               <div className="flex items-center gap-1.5 text-xs text-emerald-700 font-medium">
                 <Check className="w-3.5 h-3.5" />
-                <span>Connection verified! SORA records parsed successfully.</span>
+                <span>Endpoint successfully connected and returned SORA records!</span>
               </div>
             )}
 
@@ -160,19 +243,11 @@ export const BackendIntegrationModal: React.FC<BackendIntegrationModalProps> = (
             )}
           </div>
 
-          {/* Why a backend proxy is required for MAS in browsers */}
-          <div className="text-xs text-slate-600 bg-slate-50/80 p-3 rounded-md border border-slate-200/80 space-y-1">
-            <div className="font-semibold text-slate-900">Why build a backend proxy for MAS?</div>
-            <p>
-              The official Monetary Authority of Singapore (MAS) Datastore API (<code>eservices.mas.gov.sg</code>) does not set permissive CORS headers for client-side web requests. Your backend acts as a proxy that fetches MAS SORA rates server-to-server and provides them to this frontend.
-            </p>
-          </div>
-
           {/* Sample Backend Implementations (Ready to Copy) */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                Ready-to-Paste Backend Proxy Code
+                Serverless Implementation Reference
               </span>
               <div className="flex gap-1 text-xs">
                 <button
@@ -183,7 +258,7 @@ export const BackendIntegrationModal: React.FC<BackendIntegrationModalProps> = (
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  Node.js Express
+                  TypeScript (/api/sora.ts)
                 </button>
                 <button
                   onClick={() => setActiveCodeTab('python')}
@@ -199,7 +274,7 @@ export const BackendIntegrationModal: React.FC<BackendIntegrationModalProps> = (
             </div>
 
             <div className="relative">
-              <pre className="p-3 bg-slate-900 text-slate-100 rounded-md text-[11px] font-mono overflow-x-auto max-h-48">
+              <pre className="p-3 bg-slate-900 text-slate-100 rounded-md text-[11px] font-mono overflow-x-auto max-h-44">
                 <code>
                   {activeCodeTab === 'express' ? SAMPLE_BACKEND_EXPRESS_CODE : SAMPLE_BACKEND_PYTHON_CODE}
                 </code>
@@ -236,7 +311,7 @@ export const BackendIntegrationModal: React.FC<BackendIntegrationModalProps> = (
             onClick={handleResetToBenchmark}
             className="text-xs text-slate-600 hover:text-slate-900 font-medium transition-colors"
           >
-            Reset to MAS Benchmark
+            Reset to /api/sora Default
           </button>
 
           <div className="flex items-center gap-2">

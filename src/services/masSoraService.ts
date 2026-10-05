@@ -245,14 +245,14 @@ export async function fetchSoraRates(customUrl?: string): Promise<SoraSummary> {
       let records: SoraRecord[] = [];
       if (Array.isArray(json)) {
         records = parseMasApiRecords(json);
+      } else if (json.history && Array.isArray(json.history)) {
+        records = parseMasApiRecords(json.history);
+      } else if (json.data && Array.isArray(json.data)) {
+        records = parseMasApiRecords(json.data);
       } else if (json.result && Array.isArray(json.result.records)) {
         records = parseMasApiRecords(json.result.records);
       } else if (Array.isArray(json.records)) {
         records = parseMasApiRecords(json.records);
-      } else if (Array.isArray(json.data)) {
-        records = parseMasApiRecords(json.data);
-      } else if (json.history && Array.isArray(json.history)) {
-        records = json.history;
       }
 
       if (records.length >= 2) {
@@ -260,7 +260,7 @@ export async function fetchSoraRates(customUrl?: string): Promise<SoraSummary> {
           records,
           'custom_backend',
           configuredUrl,
-          `Connected to your custom backend at ${configuredUrl}`
+          json.message || `Connected to custom backend at ${configuredUrl}`
         );
       }
 
@@ -276,7 +276,41 @@ export async function fetchSoraRates(customUrl?: string): Promise<SoraSummary> {
     }
   }
 
-  // Case 2: Attempt direct query to MAS open Datastore API
+  // Case 2: Attempt internal serverless /api/sora endpoint
+  try {
+    const serverlessRes = await fetch('/api/sora', {
+      headers: { Accept: 'application/json' },
+    });
+
+    if (serverlessRes.ok) {
+      const soraJson = await serverlessRes.json();
+      let records: SoraRecord[] = [];
+      if (soraJson.history && Array.isArray(soraJson.history)) {
+        records = parseMasApiRecords(soraJson.history);
+      } else if (soraJson.data && Array.isArray(soraJson.data)) {
+        records = parseMasApiRecords(soraJson.data);
+      } else if (Array.isArray(soraJson)) {
+        records = parseMasApiRecords(soraJson);
+      }
+
+      if (records.length >= 2) {
+        const isLive = soraJson.status === 'success' && soraJson.masKeyConfigured;
+        return buildSoraSummary(
+          records,
+          isLive ? 'mas_api' : 'custom_backend',
+          '/api/sora (Serverless Gateway)',
+          soraJson.message ||
+            (isLive
+              ? 'Streaming live daily domestic interest rates directly from MAS APIMG Gateway.'
+              : 'Serverless gateway /api/sora active. Set MAS_KEY_ID in .env to stream live MAS data.')
+        );
+      }
+    }
+  } catch (err: any) {
+    console.info('Internal /api/sora endpoint fallback:', err.message);
+  }
+
+  // Case 3: Attempt direct query to MAS open Datastore API
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 3500);
@@ -305,63 +339,73 @@ export async function fetchSoraRates(customUrl?: string): Promise<SoraSummary> {
       }
     }
   } catch (err: any) {
-    // Note: Calling MAS Datastore directly from the browser often triggers CORS in production
-    // This is why a backend proxy is recommended and prepared for the user!
-    console.info('Direct MAS API browser call handled with calibrated MAS benchmark (CORS/network expectation):', err.message);
+    console.info('Direct MAS API browser call handled with calibrated MAS benchmark (CORS expectation):', err.message);
   }
 
-  // Case 3: Default calibrated MAS Benchmark
+  // Case 4: Default calibrated MAS Benchmark
   return buildSoraSummary(
     benchmarkFallback,
     'mas_fallback',
-    'Local MAS Calibrated Benchmark',
-    'Calibrated to current Singapore financial market SORA levels. Ready to connect to your backend proxy.'
+    '/api/sora',
+    'Serverless connection ready at /api/sora. Add MAS_KEY_ID in your environment to activate live MAS APIMG gateway.'
   );
 }
 
-export const SAMPLE_BACKEND_EXPRESS_CODE = `// Node.js + Express backend route to proxy official MAS SORA API
-// Install: npm install express cors
-import express from 'express';
-import cors from 'cors';
+export const SAMPLE_BACKEND_EXPRESS_CODE = `// Serverless /api/sora.ts connection to official MAS APIMG Gateway
+// Target: https://eservices.mas.gov.sg/apimg-gw/server/monthly_statistical_bulletin_non610mssql/domestic_interest_rates_daily/views/domestic_interest_rates_daily
+// Header required: KeyId: <MAS_KEY_ID>
 
-const app = express();
-app.use(cors());
-
-const MAS_API = 'https://eservices.mas.gov.sg/api/action/datastore/search.json?resource_id=9a0bf149-3042-45a7-96ab-07d925084e6e&limit=180&sort=end_of_day%20desc';
-
-app.get('/api/sora', async (req, res) => {
-  try {
-    const response = await fetch(MAS_API);
-    const data = await response.json();
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch MAS rates', details: err.message });
+export default async function handler(req, res) {
+  const keyId = process.env.MAS_KEY_ID;
+  if (!keyId) {
+    return res.status(401).json({ error: 'MAS_KEY_ID environment variable is missing' });
   }
-});
 
-app.listen(3001, () => console.log('MAS SORA Backend running on port 3001'));
+  const MAS_ENDPOINT = 'https://eservices.mas.gov.sg/apimg-gw/server/monthly_statistical_bulletin_non610mssql/domestic_interest_rates_daily/views/domestic_interest_rates_daily?rows=180';
+
+  try {
+    const response = await fetch(MAS_ENDPOINT, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'KeyId': keyId.trim(),
+        'User-Agent': 'MAS-SORA-Calculator/1.0',
+      },
+    });
+
+    const data = await response.json();
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.status(response.status).json(data);
+  } catch (err) {
+    res.status(502).json({ error: 'Failed to contact MAS Gateway', message: err.message });
+  }
+}
 `;
 
-export const SAMPLE_BACKEND_PYTHON_CODE = `# Python FastAPI backend route to proxy official MAS SORA API
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+export const SAMPLE_BACKEND_PYTHON_CODE = `# Python serverless /api/sora connection to MAS APIMG Gateway
+import os
 import httpx
+from fastapi import FastAPI, HTTPException, Response
 
 app = FastAPI()
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
-MAS_API = "https://eservices.mas.gov.sg/api/action/datastore/search.json?resource_id=9a0bf149-3042-45a7-96ab-07d925084e6e&limit=180&sort=end_of_day%20desc"
+MAS_ENDPOINT = "https://eservices.mas.gov.sg/apimg-gw/server/monthly_statistical_bulletin_non610mssql/domestic_interest_rates_daily/views/domestic_interest_rates_daily?rows=180"
 
 @app.get("/api/sora")
-async def get_sora_rates():
+async def get_mas_rates():
+    key_id = os.environ.get("MAS_KEY_ID")
+    if not key_id:
+        raise HTTPException(status_code=401, detail="MAS_KEY_ID environment variable is not configured")
+
+    headers = {
+        "Accept": "application/json",
+        "KeyId": key_id.strip(),
+        "User-Agent": "MAS-SORA-Calculator/1.0",
+    }
+
     async with httpx.AsyncClient() as client:
-        res = await client.get(MAS_API)
+        res = await client.get(MAS_ENDPOINT, headers=headers)
         if res.status_code != 200:
-            raise HTTPException(status_code=502, detail="MAS API unavailable")
+            raise HTTPException(status_code=res.status_code, detail="MAS Gateway error")
         return res.json()
 `;
