@@ -1,0 +1,6 @@
+{
+  "name": "SORA Singapore Rate & Mortgage Calculator",
+  "description": "Singapore Overnight Rate Average (SORA) calculator reading MAS rates with today, 1-month, 3-month, and 6-month tenors and loan simulations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
